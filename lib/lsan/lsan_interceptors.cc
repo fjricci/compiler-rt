@@ -44,6 +44,7 @@ int pthread_setspecific(unsigned key, const void *v);
 
 namespace std {
   struct nothrow_t;
+  enum class align_val_t: size_t;
 }
 
 #if !SANITIZER_MAC
@@ -203,8 +204,14 @@ INTERCEPTOR(int, mprobe, void *ptr) {
 #define OPERATOR_NEW_BODY(nothrow)                         \
   ENSURE_LSAN_INITED;                                      \
   GET_STACK_TRACE_MALLOC;                                  \
-  void *res = Allocate(stack, size, 1, kAlwaysClearMemory);\
-  if (!nothrow && UNLIKELY(!res)) DieOnFailure::OnOOM();\
+  void *res = lsan_memalign(1, size, stack);               \
+  if (!nothrow && UNLIKELY(!res)) DieOnFailure::OnOOM();   \
+  return res;
+#define OPERATOR_NEW_BODY_ALIGN(nothrow)                   \
+  ENSURE_LSAN_INITED;                                      \
+  GET_STACK_TRACE_MALLOC;                                  \
+  void *res = lsan_memalign((uptr)align, size, stack);     \
+  if (!nothrow && UNLIKELY(!res)) DieOnFailure::OnOOM();   \
   return res;
 
 #define OPERATOR_DELETE_BODY \
@@ -229,6 +236,18 @@ void *operator new(size_t size, std::nothrow_t const&)
 INTERCEPTOR_ATTRIBUTE
 void *operator new[](size_t size, std::nothrow_t const&)
 { OPERATOR_NEW_BODY(true /*nothrow*/); }
+INTERCEPTOR_ATTRIBUTE
+void *operator new(size_t size, std::align_val_t align)
+{ OPERATOR_NEW_BODY_ALIGN(false /*nothrow*/); }
+INTERCEPTOR_ATTRIBUTE
+void *operator new[](size_t size, std::align_val_t align)
+{ OPERATOR_NEW_BODY_ALIGN(false /*nothrow*/); }
+INTERCEPTOR_ATTRIBUTE
+void *operator new(size_t size, std::align_val_t align, std::nothrow_t const&)
+{ OPERATOR_NEW_BODY_ALIGN(true /*nothrow*/); }
+INTERCEPTOR_ATTRIBUTE
+void *operator new[](size_t size, std::align_val_t align, std::nothrow_t const&)
+{ OPERATOR_NEW_BODY_ALIGN(true /*nothrow*/); }
 
 INTERCEPTOR_ATTRIBUTE
 void operator delete(void *ptr) NOEXCEPT { OPERATOR_DELETE_BODY; }
@@ -238,6 +257,30 @@ INTERCEPTOR_ATTRIBUTE
 void operator delete(void *ptr, std::nothrow_t const&) { OPERATOR_DELETE_BODY; }
 INTERCEPTOR_ATTRIBUTE
 void operator delete[](void *ptr, std::nothrow_t const &)
+{ OPERATOR_DELETE_BODY; }
+INTERCEPTOR_ATTRIBUTE
+void operator delete(void *ptr, size_t size) NOEXCEPT
+{ OPERATOR_DELETE_BODY; }
+INTERCEPTOR_ATTRIBUTE
+void operator delete[](void *ptr, size_t size) NOEXCEPT
+{ OPERATOR_DELETE_BODY; }
+INTERCEPTOR_ATTRIBUTE
+void operator delete(void *ptr, std::align_val_t) NOEXCEPT
+{ OPERATOR_DELETE_BODY; }
+INTERCEPTOR_ATTRIBUTE
+void operator delete[](void *ptr, std::align_val_t) NOEXCEPT
+{ OPERATOR_DELETE_BODY; }
+INTERCEPTOR_ATTRIBUTE
+void operator delete(void *ptr, std::align_val_t, std::nothrow_t const&)
+{ OPERATOR_DELETE_BODY; }
+INTERCEPTOR_ATTRIBUTE
+void operator delete[](void *ptr, std::align_val_t, std::nothrow_t const&)
+{ OPERATOR_DELETE_BODY; }
+INTERCEPTOR_ATTRIBUTE
+void operator delete(void *ptr, size_t size, std::align_val_t) NOEXCEPT
+{ OPERATOR_DELETE_BODY; }
+INTERCEPTOR_ATTRIBUTE
+void operator delete[](void *ptr, size_t size, std::align_val_t) NOEXCEPT
 { OPERATOR_DELETE_BODY; }
 
 #else  // SANITIZER_MAC
@@ -250,6 +293,16 @@ INTERCEPTOR(void *, _ZnwmRKSt9nothrow_t, size_t size, std::nothrow_t const&)
 { OPERATOR_NEW_BODY(true /*nothrow*/); }
 INTERCEPTOR(void *, _ZnamRKSt9nothrow_t, size_t size, std::nothrow_t const&)
 { OPERATOR_NEW_BODY(true /*nothrow*/); }
+INTERCEPTOR(void *, _ZnwmSt11align_val_t, size_t size, std::align_val_t align)
+{ OPERATOR_NEW_BODY_ALIGN(false /*nothrow*/); }
+INTERCEPTOR(void *, _ZnamSt11align_val_t, size_t size, std::align_val_t align)
+{ OPERATOR_NEW_BODY_ALIGN(false /*nothrow*/); }
+INTERCEPTOR(void *, _ZnwmSt11align_val_tRKSt9nothrow_t, size_t size,
+            std::align_val_t align, std::nothrow_t const&)
+{ OPERATOR_NEW_BODY_ALIGN(true /*nothrow*/); }
+INTERCEPTOR(void *, _ZnamSt11align_val_tRKSt9nothrow_t, size_t size,
+            std::align_val_t align, std::nothrow_t const&)
+{ OPERATOR_NEW_BODY_ALIGN(true /*nothrow*/); }
 
 INTERCEPTOR(void, _ZdlPv, void *ptr)
 { OPERATOR_DELETE_BODY; }
@@ -258,6 +311,26 @@ INTERCEPTOR(void, _ZdaPv, void *ptr)
 INTERCEPTOR(void, _ZdlPvRKSt9nothrow_t, void *ptr, std::nothrow_t const&)
 { OPERATOR_DELETE_BODY; }
 INTERCEPTOR(void, _ZdaPvRKSt9nothrow_t, void *ptr, std::nothrow_t const&)
+{ OPERATOR_DELETE_BODY; }
+INTERCEPTOR(void, _ZdlPvm, void *ptr, size_t size)
+{ OPERATOR_DELETE_BODY; }
+INTERCEPTOR(void, _ZdaPvm, void *ptr, size_t size)
+{ OPERATOR_DELETE_BODY; }
+INTERCEPTOR(void, _ZdlPvSt11align_val_t, void *ptr, std::align_val_t)
+{ OPERATOR_DELETE_BODY; }
+INTERCEPTOR(void, _ZdaPvSt11align_val_t, void *ptr, std::align_val_t)
+{ OPERATOR_DELETE_BODY; }
+INTERCEPTOR(void, _ZdlPvSt11align_val_tRKSt9nothrow_t, void *ptr,
+            std::align_val_t, std::nothrow_t const&)
+{ OPERATOR_DELETE_BODY; }
+INTERCEPTOR(void, _ZdaPvSt11align_val_tRKSt9nothrow_t, void *ptr,
+            std::align_val_t, std::nothrow_t const&)
+{ OPERATOR_DELETE_BODY; }
+INTERCEPTOR(void, _ZdlPvmSt11align_val_t, void *ptr, size_t size,
+            std::align_val_t)
+{ OPERATOR_DELETE_BODY; }
+INTERCEPTOR(void, _ZdaPvmSt11align_val_t, void *ptr, size_t size,
+            std::align_val_t)
 { OPERATOR_DELETE_BODY; }
 
 #endif  // !SANITIZER_MAC
